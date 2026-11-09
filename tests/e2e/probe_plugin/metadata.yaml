@@ -1,0 +1,5 @@
+name: astrbot_plugin_e2e_probe
+display_name: E2E Probe
+description: Test-only plugin for astrbot_plugin_mcp_bridge's end-to-end test.
+author: tosaki
+version: 0.0.1

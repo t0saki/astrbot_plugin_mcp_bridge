@@ -1,0 +1,35 @@
+{
+  "metadata": {
+    "display_name": "MCP Command Bridge",
+    "desc": "Lets an external AI agent run AstrBot plugin commands over MCP / HTTP as the user who asked; the plugin answers in the chat as usual."
+  },
+  "config": {
+    "token": {
+      "description": "Bearer token clients must send (Authorization: Bearer <token>). Required: with an empty token the server does not start. Use a long random string."
+    },
+    "listen_host": {
+      "description": "Address the MCP/HTTP server listens on. Keep 127.0.0.1 unless the agent runs on another host (the token then travels in plain HTTP)."
+    },
+    "listen_port": {
+      "description": "Port of the MCP/HTTP server (MCP endpoint: http://<host>:<port>/mcp)"
+    },
+    "allow_commands": {
+      "description": "Command prefixes the agent may run, exactly as a user types them incl. the prefix (e.g. gs体力, /rss list). 'x' allows 'x' and 'x <args>'; 'x*' also allows arguments glued on ('gs查询123'). Empty = nothing may run. NEVER list destructive or admin commands."
+    },
+    "extra_commands": {
+      "description": "Commands outside AstrBot's registry (e.g. GsCore) to show in list_commands, as 'command | description'. They must also match allow_commands."
+    },
+    "max_message_age_seconds": {
+      "description": "Refuse when the referenced message is older than this many seconds"
+    },
+    "rate_limit_per_minute": {
+      "description": "Maximum run_command calls per minute across all callers (0 = unlimited)"
+    },
+    "platform_id": {
+      "description": "ID of the aiocqhttp platform instance to use. Empty = the first aiocqhttp platform."
+    },
+    "self_id": {
+      "description": "Bot QQ number. Only needed when several OneBot accounts are connected to the same aiocqhttp platform; empty = use the only connection."
+    }
+  }
+}

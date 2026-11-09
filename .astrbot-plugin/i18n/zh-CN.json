@@ -1,0 +1,35 @@
+{
+  "metadata": {
+    "display_name": "MCP 指令桥",
+    "desc": "通过 MCP / HTTP 让外部 AI agent 以提问者的身份触发 AstrBot 插件指令，插件的回复照常发到聊天里。"
+  },
+  "config": {
+    "token": {
+      "description": "客户端需携带的 Bearer token（Authorization: Bearer <token>）。必填：为空时服务不会启动。请使用足够长的随机字符串"
+    },
+    "listen_host": {
+      "description": "MCP/HTTP 服务监听地址。除非 agent 在别的机器上，否则保持 127.0.0.1（非回环地址时 token 以明文 HTTP 传输）"
+    },
+    "listen_port": {
+      "description": "MCP/HTTP 服务端口（MCP 地址：http://<host>:<port>/mcp）"
+    },
+    "allow_commands": {
+      "description": "允许 agent 执行的指令前缀，按用户输入原样书写（含前缀，如 gs体力、/rss list）。写 x 放行 x 和 “x 参数”；写 x* 还放行紧贴的参数（gs查询123）。为空 = 什么都不能执行。切勿放行破坏性或管理类指令"
+    },
+    "extra_commands": {
+      "description": "AstrBot 指令表之外的指令（如 GsCore 的），用于在 list_commands 中展示，格式“指令 | 说明”。仍需被 allow_commands 放行"
+    },
+    "max_message_age_seconds": {
+      "description": "引用的消息超过多少秒即拒绝"
+    },
+    "rate_limit_per_minute": {
+      "description": "run_command 每分钟最多调用次数（所有调用方合计，0 = 不限）"
+    },
+    "platform_id": {
+      "description": "使用哪个 aiocqhttp 平台实例的 ID。留空 = 第一个 aiocqhttp 平台"
+    },
+    "self_id": {
+      "description": "机器人 QQ 号。仅当同一个 aiocqhttp 平台上连了多个 OneBot 账号时需要；留空 = 使用唯一的连接"
+    }
+  }
+}

@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        # mcp is pinned the way AstrBot pins it; 2.x renamed the client API the tests use.
+        run: pip install pyyaml ruff pytest pytest-asyncio aiohttp aiocqhttp "mcp>=1.8.0,<2"
+
+      - name: Validate config schema
+        run: |
+          python3 -c "
+          import json, sys
+          with open('_conf_schema.json') as f:
+              schema = json.load(f)
+          errors = []
+          VALID_TYPES = {'int','float','bool','string','text','list','file','object','template_list'}
+          for k, v in schema.items():
+              t = v.get('type', '')
+              if t not in VALID_TYPES:
+                  errors.append(f'{k}: unsupported type {t!r}')
+              if t in ('list', 'object') and 'items' not in v:
+                  errors.append(f'{k}: {t} type missing items')
+          if errors:
+              for e in errors:
+                  print(f'ERROR: {e}')
+              sys.exit(1)
+          print(f'Schema OK: {len(schema)} fields')
+          "
+
+      - name: Validate metadata.yaml
+        run: |
+          python3 -c "
+          import yaml, sys
+          with open('metadata.yaml') as f:
+              meta = yaml.safe_load(f)
+          required = ['name', 'description', 'author', 'version']
+          missing = [f for f in required if f not in meta]
+          if missing:
+              print(f'ERROR: metadata.yaml missing: {missing}')
+              sys.exit(1)
+          print(f'metadata OK: {meta[\"name\"]} v{meta[\"version\"]}')
+          "
+
+      - name: Check relative imports in main.py
+        run: |
+          python3 -c "
+          import sys
+          errors = []
+          with open('main.py') as f:
+              for i, line in enumerate(f, 1):
+                  if line.startswith('from mcp_bridge'):
+                      errors.append(f'main.py:{i}: must use relative import (from .mcp_bridge)')
+          if errors:
+              for e in errors:
+                  print(f'ERROR: {e}')
+              sys.exit(1)
+          print('Import check OK')
+          "
+
+      - name: Lint with ruff
+        run: ruff check . --select E,W,F,I
+
+      - name: Check formatting with ruff
+        run: ruff format --check .
+
+      - name: Unit, HTTP and MCP round-trip tests
+        run: python -m pytest -q
