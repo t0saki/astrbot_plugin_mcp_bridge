@@ -325,6 +325,7 @@ async def scenario(ob: FakeOneBot, mcp_port: int, log_path: Path, rep: Report) -
         endpoint,
         [
             ("run_command", {"message_id": m1, "command": "/e2esecret"}),
+            ("run_command", {"message_id": m1, "command": "/e2eopen"}),
             ("run_command", {"message_id": m4, "command": "/e2e ping"}),
             ("run_command", {"message_id": m5, "command": "/e2e ping"}),
             ("run_command", {"message_id": 999999, "command": "/e2e ping"}),
@@ -335,6 +336,7 @@ async def scenario(ob: FakeOneBot, mcp_port: int, log_path: Path, rep: Report) -
     codes = [r.structuredContent.get("error") for r in results]
     assert all(r.isError for r in results), codes
     assert codes == [
+        "not_allowed",
         "not_allowed",
         "stale_message",
         "self_message",
@@ -386,11 +388,78 @@ async def scenario(ob: FakeOneBot, mcp_port: int, log_path: Path, rep: Report) -
     log = log_path.read_text(encoding="utf-8", errors="replace")
     assert log.count("[mcp_bridge] 已启动") == 2, "expected two starts (initial + reload)"
     assert "[mcp_bridge] 服务已停止" in log and "无法监听" not in log
+    rep.ok("plugin reload: old server stopped, new one bound the same port, still works")
+
+    # default-open mode with a denylist ----------------------------------------------------
+    await reconfigure(
+        ob,
+        log_path.parent,
+        mcp_port,
+        -7000007,
+        allow_commands=[],
+        deny_commands=["/e2esecret", "gs绑定"],
+    )
+    (listed,) = await mcp_call(endpoint, [("list_commands", {})])
+    cmds = {c["command"] for c in listed.structuredContent["commands"]}
+    assert {"/e2e ping", "/e2eopen", "/e2eadmin", "/e2ereload", "gs体力"} <= cmds, cmds
+    assert "/e2esecret" not in cmds and "/e2ehidden" not in cmds, cmds
+    rep.ok("default-open list_commands: whole registry + extras, minus the denied command")
+
+    n = len(ob.sent)
+    (res,) = await mcp_call(endpoint, [("run_command", {"message_id": m1, "command": "/e2eopen"})])
+    assert not res.isError, res.content
+    sent = await ob.wait_sent(lambda s: "open-ok" in ob.text_of(s))
+    assert f"open-ok user={USER} group={GROUP}" in ob.text_of(sent), sent
+    rep.ok("default-open: /e2eopen (refused under the explicit allowlist) now runs")
+
+    before = len(ob.sent)
+    results = await mcp_call(
+        endpoint,
+        [
+            ("run_command", {"message_id": m1, "command": "/e2esecret"}),
+            ("run_command", {"message_id": m1, "command": "/e2ehidden"}),  # alias of /e2esecret
+            ("run_command", {"message_id": m1, "command": "GS绑定 123"}),
+        ],
+    )
+    codes = [r.structuredContent.get("error") for r in results]
+    assert all(r.isError for r in results) and codes == ["denied"] * 3, codes
+    await asyncio.sleep(2.0)
+    assert len(ob.sent) == before, ob.sent[before:]
+    rep.ok(
+        "deny: denied command, its alias (via the registry) and a case/space variant of "
+        "a GsCore prefix are refused; nothing sent"
+    )
+
+    # both lists empty: everything runs, startup warns ------------------------------------
+    await reconfigure(ob, log_path.parent, mcp_port, -8000008, allow_commands=[], deny_commands=[])
+    log = log_path.read_text(encoding="utf-8", errors="replace")
+    assert log.count("allow_commands 与 deny_commands 均为空") == 1, "missing open-mode warning"
+    (res,) = await mcp_call(
+        endpoint, [("run_command", {"message_id": m1, "command": "/e2ehidden"})]
+    )
+    assert not res.isError, res.content
+    await ob.wait_sent(lambda s: "SECRET-RAN" in ob.text_of(s))
+    log = log_path.read_text(encoding="utf-8", errors="replace")
+    assert log.count("[mcp_bridge] 已启动") == 4 and "无法监听" not in log
     assert TOKEN not in log, "token leaked into the log"
     rep.ok(
-        "plugin reload: old server stopped, new one bound the same port, still works; "
-        "token never logged"
+        "both lists empty: startup warning logged once, any command runs; "
+        "4 starts on the same port; token never logged"
     )
+
+
+async def reconfigure(ob: FakeOneBot, root: Path, mcp_port: int, mid: int, **changes) -> None:
+    """Rewrite the bridge config and reload the plugin through a real admin message."""
+    path = root / "data" / "config" / "astrbot_plugin_mcp_bridge_config.json"
+    cfg = json.loads(path.read_text(encoding="utf-8-sig"))  # AstrBot writes a BOM
+    cfg.update(changes)
+    path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    n = len(ob.sent)
+    ob.add_message(mid, user=ADMIN, text="/e2ereload", role="owner")
+    await ob.push_event(mid)
+    sent = await ob.wait_sent(lambda s: "reloaded" in ob.text_of(s) and s in ob.sent[n:], 30)
+    assert "ok=True" in ob.text_of(sent), sent
+    await wait_health(mcp_port, timeout=30)
 
 
 async def main_async(args) -> int:

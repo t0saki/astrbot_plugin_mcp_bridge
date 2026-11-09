@@ -65,7 +65,8 @@ TOOLS: list[dict[str, Any]] = [
             "(same permissions, same chat); the plugin's answer is posted straight into the "
             "chat. This tool returns as soon as the command is handed over and does NOT "
             "return the plugin's output. Refused if the message is unknown, sent by the bot, "
-            "too old, or the command is not on the allowlist (see list_commands)."
+            "too old, or the command is refused by the plugin's allow/deny configuration "
+            "(list_commands shows what is known to be runnable)."
         ),
         "inputSchema": {
             "type": "object",

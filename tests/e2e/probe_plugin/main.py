@@ -30,9 +30,14 @@ class E2EProbe(Star):
         """仅管理员可用（e2e 探针）"""
         yield event.plain_result(f"admin-ok {_who(event)}")
 
-    @filter.command("e2esecret")
+    @filter.command("e2eopen")
+    async def open_cmd(self, event: AstrMessageEvent):
+        """不在显式白名单里、默认放行模式下可执行（e2e 探针）"""
+        yield event.plain_result(f"open-ok {_who(event)}")
+
+    @filter.command("e2esecret", alias={"e2ehidden"})
     async def secret(self, event: AstrMessageEvent):
-        """不在白名单里的指令（e2e 探针）"""
+        """显式白名单外 / 被 deny 的指令（e2e 探针）"""
         yield event.plain_result("SECRET-RAN")
 
     @filter.permission_type(filter.PermissionType.ADMIN)

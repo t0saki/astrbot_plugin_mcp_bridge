@@ -130,3 +130,77 @@ async def test_list_commands_survives_registry_failure():
     assert await service.list_commands() == [
         {"command": "gs体力", "description": "体力", "source": "extra"}
     ]
+
+
+RESET = [
+    {
+        "effective_command": "reset",
+        "aliases": ["重置"],
+        "parent_signature": "",
+        "description": "重置会话",
+        "enabled": True,
+        "plugin_activated": True,
+        "sub_commands": [],
+    }
+]
+
+
+async def test_default_open_runs_any_command():
+    service, adapter = make_service(allow=[])
+    await service.run_command(-1234567, "/whatever 1 2")
+    await service.run_command(-1234567, "gs绑定uid123")
+    texts = [e["message"][0]["data"]["text"] for e in adapter.converted]
+    assert texts == ["/whatever 1 2", "gs绑定uid123"]
+
+
+async def test_deny_wins_over_allow():
+    service, adapter = make_service(allow=["gs*"], deny_commands=["gs绑定"])
+    await service.run_command(-1234567, "gs体力")
+    err = await refused(service, -1234567, "GS绑定 123")
+    assert err.code == "denied"
+    assert len(adapter.converted) == 1 and adapter.client.calls == [
+        ("get_msg", {"message_id": -1234567})
+    ]
+
+
+async def test_deny_in_default_open_mode_never_touches_onebot():
+    service, adapter = make_service(allow=[], deny_commands=["/reset"], registry=RESET)
+    for cmd in ["/reset", "/重置", "重置", "/RESET now"]:
+        assert (await refused(service, -1234567, cmd)).code == "denied", cmd
+    assert adapter.client.calls == [] and adapter.converted == []
+    with pytest.raises(BridgeError):  # deny is a broad prefix match on purpose
+        await service.run_command(-1234567, "/resetx")
+    await service.run_command(-1234567, "/new")
+    assert len(adapter.converted) == 1
+
+
+async def test_deny_still_applies_textually_when_registry_fails():
+    service, adapter = make_service(allow=[], deny_commands=["/reset"], registry=RESET)
+
+    async def broken():
+        raise RuntimeError("db not ready")
+
+    service.backend.registry = broken
+    assert (await refused(service, -1234567, "/reset")).code == "denied"
+    await service.run_command(-1234567, "/重置")  # alias expansion needs the registry
+    assert len(adapter.converted) == 1
+
+
+async def test_list_commands_default_open_minus_denied():
+    service, _ = make_service(
+        allow=[],
+        deny_commands=["/重置"],
+        extra_commands=["gs体力 | 体力", "gs绑定 | 绑定"],
+        registry=RESET
+        + [
+            {
+                "effective_command": "help",
+                "aliases": [],
+                "description": "帮助",
+                "enabled": True,
+                "plugin_activated": True,
+                "sub_commands": [],
+            }
+        ],
+    )
+    assert [c["command"] for c in await service.list_commands()] == ["/help", "gs体力", "gs绑定"]

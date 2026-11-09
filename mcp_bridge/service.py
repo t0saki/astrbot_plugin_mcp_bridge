@@ -8,8 +8,8 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
 
-from .allowlist import check_allowed, normalize_command
-from .commands import build_command_list
+from .allowlist import check_permitted, normalize_command
+from .commands import build_command_list, registry_denial
 from .config import BridgeConfig
 from .errors import BridgeError
 from .ids import parse_message_id
@@ -84,6 +84,7 @@ class BridgeService:
             self.backend.wake_prefixes(),
             self.cfg.allow_commands,
             self.cfg.extra_commands,
+            self.cfg.deny_commands,
         )
 
     # -- run_command ----------------------------------------------------------
@@ -101,6 +102,24 @@ class BridgeService:
         except Exception as e:
             raise _classify_action_error(action, e) from None
 
+    async def _check_registry_denial(self, text: str) -> None:
+        """Refuse aliases / other wake prefixes of a denied AstrBot command."""
+        if not self.cfg.deny_commands:
+            return
+        try:
+            registry = await self.backend.registry()
+        except Exception as e:  # textual deny already applied; alias expansion is extra
+            self.log.warning("[mcp_bridge] reading AstrBot command registry failed: %r", e)
+            return
+        spelling = registry_denial(
+            registry, self.backend.wake_prefixes(), self.cfg.deny_commands, text
+        )
+        if spelling is not None:
+            raise BridgeError(
+                "denied",
+                f"指令 {text!r} 调用的 {spelling!r} 对应一个被 deny_commands 禁止的指令，拒绝执行",
+            )
+
     async def run_command(self, message_id: Any, command: Any) -> dict:
         if not self.limiter.try_acquire():
             raise BridgeError(
@@ -110,7 +129,8 @@ class BridgeService:
             )
         ref = parse_message_id(message_id)
         text = normalize_command(command)
-        check_allowed(self.cfg.allow_commands, text)
+        check_permitted(self.cfg.allow_commands, self.cfg.deny_commands, text)
+        await self._check_registry_denial(text)
 
         adapter = self.backend.get_adapter()
         data = await self._call(adapter, "get_msg", message_id=ref.message_id)

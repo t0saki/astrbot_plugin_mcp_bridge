@@ -112,11 +112,14 @@ class FakeBackend:
 def make_service(
     allow: list[str] | None = None,
     messages: dict[int, dict] | None = None,
+    registry: list[dict] | None = None,
     **cfg: Any,
 ) -> tuple[BridgeService, FakeAdapter]:
     raw = {"token": "t" * 32, "allow_commands": allow if allow is not None else ["gs体力"]}
     raw.update(cfg)
     client = FakeClient(messages if messages is not None else {-1234567: group_msg()})
     adapter = FakeAdapter(client)
-    service = BridgeService(BridgeConfig.from_dict(raw), FakeBackend(adapter), clock=lambda: NOW)
+    service = BridgeService(
+        BridgeConfig.from_dict(raw), FakeBackend(adapter, registry), clock=lambda: NOW
+    )
     return service, adapter

@@ -92,3 +92,30 @@ async def test_mcp_sdk_bad_token(server):
     found = [e for e in flatten(ei.value) if isinstance(e, httpx.HTTPStatusError)]
     assert found and found[0].response.status_code == 401
     assert server.adapter.converted == []
+
+
+async def test_mcp_sdk_default_open_and_deny():
+    service, adapter = make_service(
+        allow=[], deny_commands=["gs绑定"], extra_commands=["gs体力 | 体力", "gs绑定 | 绑定"]
+    )
+    srv = BridgeServer(service, host="127.0.0.1", port=0, token=TOKEN)
+    await srv.start()
+    try:
+        endpoint = f"http://127.0.0.1:{srv.bound_port}/mcp"
+        headers = {"Authorization": f"Bearer {TOKEN}"}
+        async with streamablehttp_client(endpoint, headers=headers) as (read, write, _):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                listed = await session.call_tool("list_commands", {})
+                assert [c["command"] for c in listed.structuredContent["commands"]] == ["gs体力"]
+                ok = await session.call_tool(
+                    "run_command", {"message_id": "-1234567", "command": "gs深渊"}
+                )
+                assert not ok.isError, ok.content
+                denied = await session.call_tool(
+                    "run_command", {"message_id": "-1234567", "command": "gs绑定uid1"}
+                )
+                assert denied.isError and denied.structuredContent["error"] == "denied"
+    finally:
+        await srv.stop()
+    assert [e["message"][0]["data"]["text"] for e in adapter.converted] == ["gs深渊"]

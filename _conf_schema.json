@@ -15,7 +15,15 @@
     "default": 6210
   },
   "allow_commands": {
-    "description": "Command prefixes the agent may run, exactly as a user types them incl. the prefix (e.g. gs体力, /rss list). 'x' allows 'x' and 'x <args>'; 'x*' also allows arguments glued on ('gs查询123'). Empty = nothing may run. NEVER list destructive or admin commands.",
+    "description": "Optional allowlist of command prefixes, exactly as a user types them incl. the prefix (e.g. gs体力, /rss list). EMPTY (default) = EVERY command may run, as any recent speaker incl. admins. Non-empty = only matches: 'x' allows 'x' and 'x <args>'; 'x*' also allows arguments glued on ('gs查询123').",
+    "type": "list",
+    "items": {
+      "type": "string"
+    },
+    "default": []
+  },
+  "deny_commands": {
+    "description": "Commands that are always refused, checked before allow_commands. Prefix match ignoring case and whitespace ('gs绑定' also blocks 'GS绑定uid123'); denying a registered AstrBot command also blocks its aliases and other wake prefixes. List bind/unbind, destructive and admin commands here.",
     "type": "list",
     "items": {
       "type": "string"
@@ -23,7 +31,7 @@
     "default": []
   },
   "extra_commands": {
-    "description": "Commands outside AstrBot's registry (e.g. GsCore) to show in list_commands, as 'command | description'. They must also match allow_commands.",
+    "description": "Commands outside AstrBot's registry (e.g. GsCore) to show in list_commands, as 'command | description'. Denied ones are hidden; with a non-empty allow_commands they must also match it.",
     "type": "list",
     "items": {
       "type": "string"

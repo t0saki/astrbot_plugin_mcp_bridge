@@ -8,6 +8,7 @@ HTTP_STATUS = {
     "invalid_message_id": 400,
     "invalid_command": 400,
     "not_allowed": 403,
+    "denied": 403,
     "self_message": 403,
     "stale_message": 403,
     "chat_mismatch": 403,

@@ -4,8 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from mcp_bridge.allowlist import check_allowed, normalize_command, parse_allowlist
-from mcp_bridge.commands import build_command_list, format_command_list, unlisted_extras
+from mcp_bridge.allowlist import check_permitted, find_denied, normalize_command, parse_allowlist
+from mcp_bridge.commands import (
+    build_command_list,
+    format_command_list,
+    registry_denial,
+    unlisted_extras,
+)
 from mcp_bridge.config import BridgeConfig, parse_extra_commands
 from mcp_bridge.errors import BridgeError
 from mcp_bridge.ids import MessageRef, parse_message_id
@@ -14,6 +19,10 @@ from mcp_bridge.ratelimit import RateLimiter
 from mcp_bridge.resolver import resolve_message
 
 from .fakes import BOT, GROUP, NOW, USER, group_msg
+
+
+def check_allowed(allow, command):
+    return check_permitted(allow, [], command)
 
 
 def code_of(fn, *a, **kw) -> str:
@@ -99,10 +108,37 @@ def test_allowlist_star_only_special_at_end_and_dedup():
     assert check_allowed(allow, "a*b")
 
 
-def test_allowlist_empty_refuses_everything():
-    with pytest.raises(BridgeError) as ei:
-        check_allowed([], "gs体力")
-    assert ei.value.code == "not_allowed" and "allow_commands 为空" in ei.value.message
+def test_empty_allowlist_permits_everything():
+    assert check_permitted([], [], "gs体力") is None
+    assert check_permitted([], [], "/reset") is None
+
+
+def test_deny_matching_is_broad_prefix():
+    deny = parse_allowlist(["gs绑定", "/rss", "/reset*"])
+    for cmd in [
+        "gs绑定",
+        "gs绑定uid123",
+        "GS绑定 123",
+        "gs 绑定",
+        "ｇｓ绑定1",
+        "/rss add x",
+        "/rssadmin",
+        "/reset",
+        "/RESET now",
+    ]:
+        assert find_denied(deny, cmd) is not None, cmd
+    for cmd in ["gs体力", "gs解绑", "/rs", "/new"]:
+        assert find_denied(deny, cmd) is None, cmd
+
+
+def test_deny_wins_over_allow_and_default_open():
+    allow = parse_allowlist(["gs*"])
+    deny = parse_allowlist(["gs绑定"])
+    assert check_permitted(allow, deny, "gs体力").prefix == "gs"
+    assert code_of(check_permitted, allow, deny, "gs绑定123") == "denied"
+    assert code_of(check_permitted, [], deny, "GS绑定 1") == "denied"
+    assert check_permitted([], deny, "/reset") is None
+    assert code_of(check_permitted, parse_allowlist(["gs体力"]), deny, "/reset") == "not_allowed"
 
 
 @pytest.mark.parametrize(
@@ -202,7 +238,7 @@ REGISTRY = [
 ]
 
 
-def test_build_command_list_filters_and_merges():
+def test_build_command_list_explicit_allowlist():
     allow = parse_allowlist(["/rss ls", "/off", "gs体力", "gs查询*", "sr体力"])
     extras = parse_extra_commands(["gs体力 | 查询原神体力", "gs删除 | 不应出现"])
     listed = build_command_list(REGISTRY, ["/"], allow, extras)
@@ -224,9 +260,39 @@ def test_build_command_list_filters_and_merges():
     assert "- gs体力 — 查询原神体力" in format_command_list(listed)
 
 
-def test_build_command_list_empty_allowlist():
-    assert build_command_list(REGISTRY, ["/"], [], parse_extra_commands(["gs体力|x"])) == []
-    assert "没有可执行的指令" in format_command_list([])
+def test_build_command_list_explicit_allowlist_minus_denied():
+    allow = parse_allowlist(["/rss list", "/help", "gs体力", "gs绑定"])
+    deny = parse_allowlist(["/rss ls", "gs绑定"])  # alias spelling denies the whole command
+    extras = parse_extra_commands(["gs体力 | 体力", "gs绑定 | 绑定"])
+    listed = build_command_list(REGISTRY, ["/"], allow, extras, deny)
+    assert [c["command"] for c in listed] == ["/help", "gs体力"]
+
+
+def test_build_command_list_default_open():
+    extras = parse_extra_commands(["gs体力 | 查询原神体力", "gs绑定 | 绑定 uid"])
+    listed = build_command_list(REGISTRY, ["/", "!"], [], extras)
+    assert [(c["command"], c["source"]) for c in listed] == [
+        ("/rss list", "astrbot"),
+        ("/rss add", "astrbot"),
+        ("/help", "astrbot"),
+        ("gs体力", "extra"),
+        ("gs绑定", "extra"),
+    ]  # groups and disabled commands are skipped; no "allowlist" entries
+    assert unlisted_extras([], extras) == []
+    deny = parse_allowlist(["!rss add", "GS绑定"])
+    listed = build_command_list(REGISTRY, ["/", "!"], [], extras, deny)
+    assert [c["command"] for c in listed] == ["/rss list", "/help", "gs体力"]
+    assert "没有可列出的指令" in format_command_list([])
+
+
+def test_registry_denial_expands_aliases_prefixes_and_bare_names():
+    deny = parse_allowlist(["/rss list"])
+    assert registry_denial(REGISTRY, ["/", "!"], deny, "/rss ls") == "/rss ls"
+    assert registry_denial(REGISTRY, ["/", "!"], deny, "!rss list 2") == "!rss list"
+    assert registry_denial(REGISTRY, ["/", "!"], deny, "rss ls") == "rss ls"  # private chat
+    assert registry_denial(REGISTRY, ["/", "!"], deny, "/rss add") is None
+    assert registry_denial(REGISTRY, ["/"], deny, "/rss lsx") is None
+    assert registry_denial(REGISTRY, ["/"], [], "/rss ls") is None
 
 
 # -- resolver ---------------------------------------------------------------------------

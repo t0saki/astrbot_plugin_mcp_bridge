@@ -65,6 +65,7 @@ class BridgeConfig:
     platform_id: str = ""
     self_id: str = ""
     allow_commands: list[AllowEntry] = field(default_factory=list)
+    deny_commands: list[AllowEntry] = field(default_factory=list)
     extra_commands: list[ExtraCommand] = field(default_factory=list)
     max_message_age_seconds: int = DEFAULT_MAX_AGE
     rate_limit_per_minute: int = DEFAULT_RATE
@@ -82,6 +83,7 @@ class BridgeConfig:
             platform_id=_str(raw, "platform_id"),
             self_id=_str(raw, "self_id"),
             allow_commands=parse_allowlist(_str_list(raw, "allow_commands")),
+            deny_commands=parse_allowlist(_str_list(raw, "deny_commands")),
             extra_commands=parse_extra_commands(_str_list(raw, "extra_commands")),
             max_message_age_seconds=_int(raw, "max_message_age_seconds", DEFAULT_MAX_AGE, 1),
             rate_limit_per_minute=_int(raw, "rate_limit_per_minute", DEFAULT_RATE, 0),

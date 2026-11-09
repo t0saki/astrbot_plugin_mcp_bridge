@@ -181,3 +181,26 @@ async def test_stop_releases_port_and_restart_on_same_port():
     finally:
         await second.stop()
     await second.stop()  # idempotent
+
+
+async def test_default_open_with_deny_over_http():
+    service, adapter = make_service(
+        allow=[], deny_commands=["gs绑定"], extra_commands=["gs体力 | 体力", "gs绑定 | 绑定"]
+    )
+    srv = BridgeServer(service, host="127.0.0.1", port=0, token=TOKEN)
+    await srv.start()
+    try:
+        async with aiohttp.ClientSession(headers=AUTH) as s:
+            async with s.get(url(srv, "/v1/commands")) as r:
+                assert [c["command"] for c in (await r.json())["commands"]] == ["gs体力"]
+            async with s.post(
+                url(srv, "/v1/run"), json={"message_id": -1234567, "command": "/anything"}
+            ) as r:
+                assert r.status == 200
+            async with s.post(
+                url(srv, "/v1/run"), json={"message_id": -1234567, "command": "gs绑定 1"}
+            ) as r:
+                assert r.status == 403 and (await r.json())["error"] == "denied"
+    finally:
+        await srv.stop()
+    assert [e["message"][0]["data"]["text"] for e in adapter.converted] == ["/anything"]

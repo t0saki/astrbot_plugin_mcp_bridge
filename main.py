@@ -98,8 +98,20 @@ class McpBridgePlugin(Star):
             return
         if len(cfg.token) < 16:
             logger.warning("[mcp_bridge] token 少于 16 个字符，建议使用更长的随机字符串。")
-        if not cfg.allow_commands:
-            logger.warning("[mcp_bridge] allow_commands 为空：run_command 会拒绝一切指令。")
+        if not cfg.allow_commands and not cfg.deny_commands:
+            logger.warning(
+                "[mcp_bridge] allow_commands 与 deny_commands 均为空：任何指令都可以被执行，"
+                "执行身份可以是最近 %d 秒内发过言的任何人（包括 AstrBot 管理员）。"
+                "请用 deny_commands 排除绑定/解绑/管理类等破坏性指令，"
+                "或改用明确的 allow_commands。",
+                cfg.max_message_age_seconds,
+            )
+        elif not cfg.allow_commands:
+            logger.info(
+                "[mcp_bridge] allow_commands 为空：除 deny_commands 中的 %d 条外，"
+                "所有指令均可执行。",
+                len(cfg.deny_commands),
+            )
         for command in unlisted_extras(cfg.allow_commands, cfg.extra_commands):
             logger.warning(
                 "[mcp_bridge] extra_commands 中的 %r 不在 allow_commands 内，"
@@ -130,10 +142,11 @@ class McpBridgePlugin(Star):
         self.server = server
         logger.info(
             "[mcp_bridge] 已启动：MCP http://%s:%s/mcp ，HTTP /v1/commands /v1/run ；"
-            "放行 %d 条指令前缀",
+            "%s，禁止 %d 条",
             cfg.listen_host,
             server.bound_port,
-            len(cfg.allow_commands),
+            f"放行 {len(cfg.allow_commands)} 条" if cfg.allow_commands else "默认放行全部指令",
+            len(cfg.deny_commands),
         )
 
     async def terminate(self) -> None:

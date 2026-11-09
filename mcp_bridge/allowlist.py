@@ -1,8 +1,10 @@
-"""Command validation and allowlist matching.
+"""Command validation, allowlist and denylist matching.
 
-An allowlist entry is a command prefix written exactly as a user types it,
-including AstrBot's wake prefix (``/rss list``) or the GsCore prefix
-(``gs体力``). Matching is literal and case-sensitive:
+Entries are command prefixes written exactly as a user types them, including
+AstrBot's wake prefix (``/rss list``) or the GsCore prefix (``gs体力``).
+
+``allow_commands`` (empty = every command may run; otherwise only matches):
+matching is literal and case-sensitive.
 
 * ``gs体力``  allows ``gs体力`` and ``gs体力 <args>`` (entry followed by
   whitespace and anything), but NOT ``gs体力xyz``. This keeps ``/rss`` from
@@ -12,6 +14,14 @@ including AstrBot's wake prefix (``/rss list``) or the GsCore prefix
   harmless — ``gs*`` would allow *every* GsCore command, including admin ones.
 
 ``*`` is only special at the end of an entry; anywhere else it is literal.
+
+``deny_commands`` is checked first and wins over the allowlist. It is matched
+more broadly on purpose (it can only refuse more, never less, than the
+allowlist rule would): a command is denied when, after NFKC normalisation,
+case folding and removing all whitespace, it *starts with* the equally
+normalised entry. So ``gs绑定`` also denies ``GS绑定uid123`` and ``gs 绑定 1``,
+and ``/rss`` denies the whole ``/rss ...`` group. A trailing ``*`` is accepted
+and ignored.
 """
 
 from __future__ import annotations
@@ -90,13 +100,36 @@ def find_match(entries: list[AllowEntry], command: str) -> AllowEntry | None:
     return None
 
 
-def check_allowed(entries: list[AllowEntry], command: str) -> AllowEntry:
-    entry = find_match(entries, command)
+def _fold(text: str) -> str:
+    return "".join(unicodedata.normalize("NFKC", text).casefold().split())
+
+
+def find_denied(entries: list[AllowEntry], command: str) -> AllowEntry | None:
+    folded = _fold(command)
+    for entry in entries:
+        prefix = _fold(entry.prefix)
+        if prefix and folded.startswith(prefix):
+            return entry
+    return None
+
+
+def check_permitted(
+    allow: list[AllowEntry], deny: list[AllowEntry], command: str
+) -> AllowEntry | None:
+    """Raise unless ``command`` passes deny_commands and allow_commands.
+
+    Returns the matching allow entry, or None when the allowlist is empty
+    (default-open mode).
+    """
+    denied = find_denied(deny, command)
+    if denied is not None:
+        raise BridgeError(
+            "denied", f"指令 {command!r} 命中 deny_commands 中的 {denied.display!r}，拒绝执行"
+        )
+    if not allow:
+        return None
+    entry = find_match(allow, command)
     if entry is None:
-        if not entries:
-            raise BridgeError(
-                "not_allowed", "allow_commands 为空：管理员尚未放行任何指令，拒绝执行"
-            )
         raise BridgeError(
             "not_allowed",
             f"指令 {command!r} 不在 allow_commands 白名单内；可用 list_commands 查看可执行的指令",

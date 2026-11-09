@@ -14,10 +14,13 @@
       "description": "MCP/HTTP 服务端口（MCP 地址：http://<host>:<port>/mcp）"
     },
     "allow_commands": {
-      "description": "允许 agent 执行的指令前缀，按用户输入原样书写（含前缀，如 gs体力、/rss list）。写 x 放行 x 和 “x 参数”；写 x* 还放行紧贴的参数（gs查询123）。为空 = 什么都不能执行。切勿放行破坏性或管理类指令"
+      "description": "可选的放行名单：指令前缀，按用户输入原样书写（含前缀，如 gs体力、/rss list）。为空（默认）= 任何指令都可执行，执行身份可以是最近发过言的任何人（包括管理员）。非空 = 只放行匹配项：写 x 放行 x 和“x 参数”；写 x* 还放行紧贴的参数（gs查询123）"
+    },
+    "deny_commands": {
+      "description": "始终拒绝的指令，先于 allow_commands 检查。按前缀匹配且忽略大小写和空白（gs绑定 也会拦住 GS绑定uid123）；禁止一个 AstrBot 已注册指令时，它的别名和其他唤醒前缀写法一并禁止。请把绑定/解绑、破坏性和管理类指令写在这里"
     },
     "extra_commands": {
-      "description": "AstrBot 指令表之外的指令（如 GsCore 的），用于在 list_commands 中展示，格式“指令 | 说明”。仍需被 allow_commands 放行"
+      "description": "AstrBot 指令表之外的指令（如 GsCore 的），用于在 list_commands 中展示，格式“指令 | 说明”。被 deny_commands 命中的不展示；allow_commands 非空时还需被其放行"
     },
     "max_message_age_seconds": {
       "description": "引用的消息超过多少秒即拒绝"
