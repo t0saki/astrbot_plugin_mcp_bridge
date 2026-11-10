@@ -204,3 +204,110 @@ async def test_list_commands_default_open_minus_denied():
         ],
     )
     assert [c["command"] for c in await service.list_commands()] == ["/help", "gs体力", "gs绑定"]
+
+
+HELP = {
+    "effective_command": "help",
+    "aliases": [],
+    "parent_signature": "",
+    "description": "帮助",
+    "enabled": True,
+    "plugin_activated": True,
+    "sub_commands": [],
+}
+WAKE = ["/", "core", "gs"]
+
+
+@pytest.mark.parametrize(
+    "deny,listed,refused_cmds,accepted_cmds",
+    [
+        # "core" is also a wake prefix: literal only, must not deny every registered command
+        (
+            ["core"],
+            ["/reset", "/help"],
+            ["corehelp", "core重启", "CORE reset"],
+            ["/help", "gshelp"],
+        ),
+        (["co"], ["/reset", "/help"], ["corehelp", "co"], ["/help", "gsreset"]),
+        # a real command entry still expands to every wake prefix, the bare name and aliases
+        (
+            ["/reset"],
+            ["/help"],
+            ["/reset", "gsreset", "corereset", "reset", "重置", "/重置", "core重置"],
+            ["/help", "corehelp"],
+        ),
+        # "/" refuses "/help" literally, so the listing shows another spelling
+        (["/"], ["corereset", "corehelp"], ["/help", "/reset"], ["corehelp", "gsreset"]),
+        (["/", "core", "gs"], [], ["/help", "corehelp", "gshelp"], ["help"]),
+        (["gs绑定"], ["/reset", "/help"], ["gs绑定", "GS绑定 123456789"], ["/help", "gsreset"]),
+    ],
+)
+async def test_deny_entry_that_is_a_wake_prefix_is_literal_only(
+    deny, listed, refused_cmds, accepted_cmds
+):
+    service, adapter = make_service(
+        allow=[], deny_commands=deny, registry=RESET + [HELP], prefixes=WAKE
+    )
+    commands = [c["command"] for c in await service.list_commands()]
+    assert commands == listed
+    for cmd in refused_cmds:
+        assert (await refused(service, -1234567, cmd)).code == "denied", cmd
+    assert adapter.client.calls == []
+    for cmd in accepted_cmds + commands:  # whatever is listed must also be runnable
+        await service.run_command(-1234567, cmd)
+    assert len(adapter.converted) == len(accepted_cmds) + len(commands)
+
+
+RESET_SPACED = [dict(RESET[0], aliases=["重置", "reset all"])]
+
+
+async def test_deny_catches_whitespace_after_the_wake_prefix():
+    service, adapter = make_service(
+        allow=[],
+        deny_commands=["/reset"],
+        registry=RESET_SPACED + [HELP],
+        prefixes=WAKE,
+        extra_commands=["gs reset | 不应列出", "gs体力 | 体力"],
+    )
+    for cmd in [
+        "core reset",
+        "gs reset",
+        "/ reset",
+        "GS  RESET",
+        "ｇｓ ｒｅｓｅｔ",  # full width
+        "／reset",
+        "core 重置",
+        "gs reset all",
+        "/ reset  all 1",
+        "reset all",
+    ]:
+        assert (await refused(service, -1234567, cmd)).code == "denied", cmd
+    assert adapter.client.calls == []
+    listed = [c["command"] for c in await service.list_commands()]
+    assert listed == ["/help", "gs体力"]
+    for cmd in listed + ["gs help", "core help 1"]:
+        await service.run_command(-1234567, cmd)
+    assert len(adapter.converted) == len(listed) + 2
+
+
+async def test_deny_core_still_allows_other_prefixes_with_whitespace():
+    service, adapter = make_service(
+        allow=[], deny_commands=["core"], registry=RESET + [HELP], prefixes=WAKE
+    )
+    for cmd in ["/help", "gs help", "/ help", "GS reset"]:
+        await service.run_command(-1234567, cmd)
+    assert (await refused(service, -1234567, "core help")).code == "denied"  # literal
+    assert len(adapter.converted) == 4
+
+
+async def test_listed_spellings_are_never_refused_under_folding():
+    # alias "r" of a denied command folds onto "/rss" spellings: they are hidden, not listed
+    registry = [dict(RESET[0], aliases=["r"]), HELP, dict(HELP, effective_command="rss")]
+    service, adapter = make_service(
+        allow=[], deny_commands=["/reset"], registry=registry, prefixes=WAKE
+    )
+    listed = [c["command"] for c in await service.list_commands()]
+    assert listed == ["/help"]
+    assert (await refused(service, -1234567, "/rss")).code == "denied"
+    for cmd in listed:
+        await service.run_command(-1234567, cmd)

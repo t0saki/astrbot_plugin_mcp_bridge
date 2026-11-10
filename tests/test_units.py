@@ -6,10 +6,12 @@ import pytest
 
 from mcp_bridge.allowlist import check_permitted, find_denied, normalize_command, parse_allowlist
 from mcp_bridge.commands import (
+    allow_wake_prefix_entries,
     build_command_list,
     format_command_list,
     registry_denial,
     unlisted_extras,
+    wake_prefix_collisions,
 )
 from mcp_bridge.config import BridgeConfig, parse_extra_commands
 from mcp_bridge.errors import BridgeError
@@ -291,7 +293,8 @@ def test_registry_denial_expands_aliases_prefixes_and_bare_names():
     assert registry_denial(REGISTRY, ["/", "!"], deny, "!rss list 2") == "!rss list"
     assert registry_denial(REGISTRY, ["/", "!"], deny, "rss ls") == "rss ls"  # private chat
     assert registry_denial(REGISTRY, ["/", "!"], deny, "/rss add") is None
-    assert registry_denial(REGISTRY, ["/"], deny, "/rss lsx") is None
+    # folded prefix match, like the literal deny check: broad on purpose
+    assert registry_denial(REGISTRY, ["/"], deny, "/rss lsx") == "/rss ls"
     assert registry_denial(REGISTRY, ["/"], [], "/rss ls") is None
 
 
@@ -412,3 +415,50 @@ def test_build_payload_private_has_no_group():
 
 def test_cq_escape():
     assert cq_escape("a&[b],") == "a&amp;&#91;b&#93;,"
+
+
+def test_wake_prefix_collisions():
+    deny = parse_allowlist(["core", "co", "/", "/reset", "gs绑定", "GS*"])
+    assert wake_prefix_collisions(deny, ["/", "core", "gs"]) == [
+        ("core", "core"),
+        ("co", "core"),
+        ("/", "/"),
+        ("GS*", "gs"),
+    ]
+    assert wake_prefix_collisions(deny, []) == []
+    assert wake_prefix_collisions(parse_allowlist(["/reset"]), ["/", ""]) == []
+
+
+def test_registry_expansion_ignores_deny_entries_that_are_only_a_wake_prefix():
+    wake = ["/", "core"]
+    for entry in ["core", "co", "/"]:
+        deny = parse_allowlist([entry])
+        assert registry_denial(REGISTRY, wake, deny, "/help") is None, entry
+    deny = parse_allowlist(["corerss list"])  # longer than the prefix: names the command
+    assert registry_denial(REGISTRY, wake, deny, "/rss ls") == "/rss ls"
+    listed = build_command_list(
+        REGISTRY, wake, parse_allowlist(["/help", "corehelp"]), [], parse_allowlist(["/"])
+    )
+    assert [c["command"] for c in listed] == ["corehelp"]
+
+
+def test_registry_denial_folds_whitespace_after_the_wake_prefix():
+    wake = ["/", "core", "gs"]
+    deny = parse_allowlist(["/rss list"])
+    for cmd in ["core rss list", "/ rss ls", "GS  RSS  LS 2", "ｇｓrss list", "rss  ls"]:
+        assert registry_denial(REGISTRY, wake, deny, cmd) is not None, cmd
+    assert registry_denial(REGISTRY, wake, deny, "gs rss add") is None
+    for entry in ["core", "co", "/"]:  # wake-prefix entries still do not expand
+        for cmd in ["/help", "gs help", "core help"]:
+            assert registry_denial(REGISTRY, wake, parse_allowlist([entry]), cmd) is None
+
+
+def test_allow_wake_prefix_entries():
+    allow = parse_allowlist(["core", "gs*", "co*", "c", "/rss list", "gs体力", "GS"])
+    assert allow_wake_prefix_entries(allow, ["/", "core", "gs", ""]) == [
+        ("core", "core"),
+        ("gs*", "gs"),
+        ("co*", "core"),
+    ]
+    assert allow_wake_prefix_entries(parse_allowlist(["/*"]), ["/"]) == [("/*", "/")]
+    assert allow_wake_prefix_entries([], ["/", "core"]) == []

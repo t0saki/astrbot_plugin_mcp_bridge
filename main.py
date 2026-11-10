@@ -23,7 +23,11 @@ from typing import Any
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.star import Context, Star
 
-from .mcp_bridge.commands import unlisted_extras
+from .mcp_bridge.commands import (
+    allow_wake_prefix_entries,
+    unlisted_extras,
+    wake_prefix_collisions,
+)
 from .mcp_bridge.config import BridgeConfig
 from .mcp_bridge.errors import BridgeError
 from .mcp_bridge.http_server import BridgeServer
@@ -118,6 +122,27 @@ class McpBridgePlugin(Star):
                 "不会被列出也不能执行。",
                 command,
             )
+        backend = AstrBotBackend(self.context, cfg.platform_id)
+        try:
+            prefixes = backend.wake_prefixes()
+            collisions = wake_prefix_collisions(cfg.deny_commands, prefixes)
+            wide_allows = allow_wake_prefix_entries(cfg.allow_commands, prefixes)
+        except Exception:  # only a hint; never block startup
+            collisions, wide_allows = [], []
+        for entry, prefix in collisions:
+            logger.warning(
+                "[mcp_bridge] deny_commands 中的 %r 等于或是唤醒前缀 %r 的开头：只按字面拒绝"
+                "以它开头的输入，不会因此禁止 AstrBot 已注册的指令（否则所有指令都会被禁止）。",
+                entry,
+                prefix,
+            )
+        for entry, prefix in wide_allows:
+            logger.warning(
+                "[mcp_bridge] allow_commands 中的 %r 覆盖了唤醒前缀 %r：AstrBot 会去掉前缀"
+                "（以及其后的空白）再匹配指令，因此它实际上放行了所有已注册的 AstrBot 指令。",
+                entry,
+                prefix,
+            )
         if not _is_loopback(cfg.listen_host):
             logger.warning(
                 "[mcp_bridge] 监听地址 %s 不是回环地址：token 将以明文 HTTP 传输，"
@@ -125,7 +150,7 @@ class McpBridgePlugin(Star):
                 cfg.listen_host,
             )
 
-        service = BridgeService(cfg, AstrBotBackend(self.context, cfg.platform_id), logger=logger)
+        service = BridgeService(cfg, backend, logger=logger)
         server = BridgeServer(
             service, host=cfg.listen_host, port=cfg.listen_port, token=cfg.token, logger=logger
         )

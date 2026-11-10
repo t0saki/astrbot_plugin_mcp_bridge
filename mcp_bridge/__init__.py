@@ -4,4 +4,4 @@ Everything in this package is free of AstrBot imports so it can be unit-tested
 without an AstrBot installation; ``main.py`` wires it to the real Context.
 """
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"

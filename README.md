@@ -69,6 +69,7 @@
 
 - 不带 `*` 时，条目后面只能是「结束」或「空白 + 参数」。这样 `/rss` 不会顺带放行另一个指令 `/rssadmin`。
 - 结尾加 `*` 表示允许参数**紧贴**在前缀后面（GsCore 常见写法）。只对紧贴参数无害的指令使用：`gs*` 会放行**所有** GsCore 指令，包括管理类。`*` 只在结尾有特殊含义。
+- 不要把唤醒前缀本身写进放行名单：AstrBot 会去掉唤醒前缀及其后的空白再匹配指令，所以 `core`（放行 `core reset`）、`core*` 或 `co*` 实际上放行了**所有**已注册的 AstrBot 指令；插件启动时会对这种条目打印警告。
 
 **`deny_commands`：故意匹配得更宽**（它只会比放行规则拒绝得更多，不会更少）
 
@@ -79,7 +80,8 @@
 | `gs绑定` | `gs绑定`、`gs绑定uid123`、`GS绑定 123`、`gs 绑定` |
 | `/rss` | `/rss`、`/rss add …`、`/rss del …`、`/rssadmin`（整组） |
 
-- 对 AstrBot **已注册**的指令，禁止其中任何一种写法，就会禁止它的**所有写法**：别名、其他唤醒前缀、以及私聊里不带前缀的写法。例如禁止 `/reset` 后，`/reset` 的别名同样被拒绝，`list_commands` 也不再列出它。
+- 对 AstrBot **已注册**的指令，禁止其中任何一种写法，就会禁止它的**所有写法**：别名、其他唤醒前缀、以及私聊里不带前缀的写法。例如禁止 `/reset` 后，`/reset` 的别名同样被拒绝，`list_commands` 也不再列出它。这些写法同样按上面的方式忽略大小写、全角/半角和空白做前缀匹配，所以 `core reset`、`GS  RESET` 也会被拒绝（AstrBot 会去掉唤醒前缀后的空白再匹配指令）；代价是很短的别名（如 `r`）会连带拒绝以它开头的其他指令，这些指令也不会被列出。
+- 例外：条目本身就是某个唤醒前缀、或是它的开头（唤醒前缀含 `core` 时的 `core`、`co`，或者 `/`）时，它只说明了前缀、没指出是哪条指令，因此**只按字面拦截**以它开头的输入（`core` 仍拒绝 `corehelp`、`core重启`），不会据此把 AstrBot 已注册的指令全部禁掉；插件启动时会对这种条目打印警告。`list_commands` 不会列出被字面拦截的写法，会改用另一个唤醒前缀的写法（如禁止 `/` 时列出 `corehelp`），没有可用写法就不列出。
 - AstrBot 指令表之外的指令（GsCore 等）插件无从得知别名，只能按文本前缀拦截；请把 GsCore 的危险指令按前缀写全（`gs绑定`、`gs解绑`……），并记住 GsCore 侧可能还有别的说法。这正是「明确的 `allow_commands` 更可靠」的原因。
 
 **`extra_commands`** 只是给 `list_commands` 用的说明文字（`指令 | 说明`）。被 `deny_commands` 命中的不会列出；`allow_commands` 非空时还需被它放行（不匹配的会在启动时打印警告），为空时无此要求。
@@ -87,7 +89,7 @@
 ## MCP 工具
 
 - `list_commands()`：可执行的指令及一句话说明。
-  - `allow_commands` 为空：AstrBot 全部已注册且启用的指令（按第一个唤醒前缀渲染，如 `/rss list`，附 `permission` 字段）加上 `extra_commands`，减去被禁止的。注意默认模式下**没列出的指令也可能被接受**（例如没写进 `extra_commands` 的 GsCore 指令）。
+  - `allow_commands` 为空：AstrBot 全部已注册且启用的指令（按第一个不被 `deny_commands` 字面拦截的唤醒前缀渲染，如 `/rss list`，附 `permission` 字段）加上 `extra_commands`，减去被禁止的。注意默认模式下**没列出的指令也可能被接受**（例如没写进 `extra_commands` 的 GsCore 指令）。
   - `allow_commands` 非空：已注册指令 ∩ 放行名单，加上 `extra_commands` ∩ 放行名单，再加上未被以上覆盖的放行条目，同样减去被禁止的。
 - `run_command(message_id, command)`：以 `message_id` 那条消息的作者身份、在那条消息所在的会话里执行 `command`。
   - `message_id`：整数（数字或字符串，可为负，如 `-1234567`），或 `ob:<chat>:<整数>`，如 `ob:group:123456789:-1234567`、`ob:private:10001:42`。只把末尾整数传给 `get_msg`；若 `<chat>` 是 `group:<群号>` / `private:<QQ>`，还会与实际会话核对，不符即拒绝。

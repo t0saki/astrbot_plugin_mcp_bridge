@@ -12,7 +12,10 @@ Sources, each minus everything ``deny_commands`` refuses:
 
 A registered command counts as denied when *any* of its spellings (every wake
 prefix, no prefix, every alias) matches ``deny_commands``, so denying
-``/reset`` also refuses its aliases and other wake prefixes.
+``/reset`` also refuses its aliases and other wake prefixes. A deny entry that
+also matches a wake prefix on its own (``core`` with wake prefix ``core``, or
+``/``) says nothing about which command is meant, so it does not count for that
+prefix's spellings; it is still applied literally to the typed text.
 """
 
 from __future__ import annotations
@@ -69,6 +72,39 @@ def _all_spellings(entry: dict, wake_prefixes: list[str]) -> list[str]:
     return _forms(entry, wake_prefixes) + _names(entry)
 
 
+def _prefixed_spellings(entry: dict, wake_prefixes: list[str]) -> list[tuple[str, str]]:
+    """``(wake prefix, spelling)`` for every spelling; ``""`` for the bare names."""
+    names = _names(entry)
+    return [(p, p + n) for n in names for p in wake_prefixes] + [("", n) for n in names]
+
+
+def _identifies(deny: AllowEntry, wake_prefix: str, spelling: str) -> bool:
+    # "core" matches "corehelp" only because "core" is a wake prefix: not this command
+    return bool(find_denied([deny], spelling)) and not find_denied([deny], wake_prefix)
+
+
+def wake_prefix_collisions(
+    deny: list[AllowEntry], wake_prefixes: list[str]
+) -> list[tuple[str, str]]:
+    """``(deny entry, wake prefix)`` pairs where the entry is, or is a leading part
+    of, the wake prefix and is therefore applied literally only (startup warning)."""
+    return [(d.display, p) for d in deny for p in wake_prefixes if find_denied([d], p)]
+
+
+def allow_wake_prefix_entries(
+    allow: list[AllowEntry], wake_prefixes: list[str]
+) -> list[tuple[str, str]]:
+    """``(allow entry, wake prefix)`` pairs where the entry permits every registered
+    command through that prefix: ``core`` / ``core*`` (AstrBot strips the
+    whitespace in ``core reset``), or ``co*`` (startup warning)."""
+    return [
+        (a.display, p)
+        for a in allow
+        for p in wake_prefixes
+        if p and (a.prefix == p or (a.glued and p.startswith(a.prefix)))
+    ]
+
+
 def _runnable(entry: dict) -> bool:
     if entry.get("is_group"):
         return False  # a group by itself only prints help; its sub-commands are listed
@@ -76,23 +112,36 @@ def _runnable(entry: dict) -> bool:
 
 
 def _entry_denied(entry: dict, wake_prefixes: list[str], deny: list[AllowEntry]) -> bool:
-    return bool(deny) and any(find_denied(deny, f) for f in _all_spellings(entry, wake_prefixes))
+    return any(
+        _identifies(d, p, s) for p, s in _prefixed_spellings(entry, wake_prefixes) for d in deny
+    )
+
+
+def _denied_spellings(
+    entries: Iterable[dict], wake_prefixes: list[str], deny: list[AllowEntry]
+) -> list[AllowEntry]:
+    """Every spelling of every denied registered command, as deny entries."""
+    if not deny:
+        return []
+    return [
+        AllowEntry(spelling, False)
+        for entry in _flatten(entries)
+        if _entry_denied(entry, wake_prefixes, deny)
+        for spelling in _all_spellings(entry, wake_prefixes)
+    ]
 
 
 def registry_denial(
     entries: Iterable[dict], wake_prefixes: list[str], deny: list[AllowEntry], command: str
 ) -> str | None:
     """If ``command`` invokes a registered command that is denied under any of
-    its spellings, return the spelling that was invoked."""
-    if not deny:
-        return None
-    for entry in _flatten(entries):
-        if not _entry_denied(entry, wake_prefixes, deny):
-            continue
-        for spelling in _all_spellings(entry, wake_prefixes):
-            if AllowEntry(spelling, False).matches(command):
-                return spelling
-    return None
+    its spellings, return the spelling that was invoked.
+
+    Uses the same folding as the literal deny check, so ``core reset`` and
+    ``GS  RESET`` (AstrBot strips the whitespace after a wake prefix) are caught
+    as ``corereset`` / ``gsreset``."""
+    hit = find_denied(_denied_spellings(entries, wake_prefixes, deny), command)
+    return hit.prefix if hit else None
 
 
 def registry_commands(
@@ -102,15 +151,21 @@ def registry_commands(
     deny: list[AllowEntry] | None = None,
 ) -> list[dict]:
     deny = deny or []
+    entries = list(entries)
+    # never list a spelling that run_command refuses (deny "/" vs "/help", or a
+    # spelling that folds onto a denied command's spelling)
+    refused = deny + _denied_spellings(entries, wake_prefixes, deny)
     result = []
     for entry in _flatten(entries):
         if not _runnable(entry) or _entry_denied(entry, wake_prefixes, deny):
             continue
-        forms = _forms(entry, wake_prefixes)
-        chosen = (
-            forms[0]
-            if (forms and not allow)
-            else next((f for f in forms if find_match(allow, f)), None)
+        chosen = next(
+            (
+                f
+                for f in _forms(entry, wake_prefixes)
+                if not find_denied(refused, f) and (not allow or find_match(allow, f))
+            ),
+            None,
         )
         if chosen is None:
             continue
@@ -139,6 +194,8 @@ def build_command_list(
     seen = {c["command"] for c in listed}
     for extra in extras:
         if extra.command in seen or find_denied(deny, extra.command):
+            continue
+        if registry_denial(registry, wake_prefixes, deny, extra.command):
             continue
         if allow and not find_match(allow, extra.command):
             continue
