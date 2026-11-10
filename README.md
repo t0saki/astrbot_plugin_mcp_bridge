@@ -169,3 +169,7 @@ env -i PATH=<venv>/bin:/usr/bin:/bin HOME=<work>/home \
   <venv>/bin/python tests/e2e/run_e2e.py --astrbot-src <AstrBot 源码目录> --work <工作目录>
 ```
 
+
+## 许可证
+
+[AGPL-3.0](LICENSE)，与 AstrBot 一致。
